@@ -139,16 +139,22 @@ class QFormer(nn.Module):
         Returns:
             [B, num_query_tokens, hidden_size]
         """
-        # Run in float32 to prevent FP16 overflow with random init
+        # Disable autocast and run in float32 to prevent FP16 overflow with random init
         orig_dtype = encoder_hidden_states.dtype
-        encoder_hidden_states = self.encoder_proj(encoder_hidden_states.float())
-        batch_size = encoder_hidden_states.shape[0]
-        hidden_states = self.query_tokens.float().expand(batch_size, -1, -1)
+        device = encoder_hidden_states.device
+        
+        # Explicitly disable autocast to ensure float32 computation
+        with torch.amp.autocast(device.type, enabled=False):
+            encoder_hidden_states = self.encoder_proj(encoder_hidden_states.float())
+            batch_size = encoder_hidden_states.shape[0]
+            hidden_states = self.query_tokens.float().expand(batch_size, -1, -1)
 
-        for layer in self.layers:
-            hidden_states = layer(hidden_states, encoder_hidden_states)
+            for layer in self.layers:
+                hidden_states = layer(hidden_states, encoder_hidden_states)
 
-        return self.norm(hidden_states).to(orig_dtype)
+            hidden_states = self.norm(hidden_states)
+        
+        return hidden_states.to(orig_dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +383,15 @@ class MedicalBLIP2(nn.Module):
             # Custom Q-Former (fallback)
             visual_tokens = self.qformer(image_features)  # [B, num_queries, qf_hidden]
 
-        # Project to T5 space — use float32 for stability (prevents FP16 overflow
-        # when Q-Former is randomly initialized)
-        visual_tokens_f32 = visual_tokens.float()
-        visual_embeds = self.proj_norm(self.projection(visual_tokens_f32))
+        # Project to T5 space — disable autocast for stability with random init
+        with torch.amp.autocast(pixel_values.device.type, enabled=False):
+            visual_tokens_f32 = visual_tokens.float()
+            # Clamp extreme values to prevent NaN from propagating
+            visual_tokens_f32 = torch.clamp(visual_tokens_f32, min=-1e4, max=1e4)
+            visual_embeds = self.proj_norm(self.projection(visual_tokens_f32))
+            # Replace any NaN/Inf with 0 as safety measure
+            visual_embeds = torch.nan_to_num(visual_embeds, nan=0.0, posinf=1e4, neginf=-1e4)
+        
         return visual_embeds.to(visual_tokens.dtype)
 
     def _build_encoder_inputs(self, pixel_values, input_ids, attention_mask):
