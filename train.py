@@ -103,9 +103,12 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
                 [p for p in model.parameters() if p.requires_grad],
                 config.max_grad_norm,
             )
+            # Only step scheduler if scaler didn't skip optimizer step
+            old_scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
-            scheduler.step()
+            if scaler.get_scale() >= old_scale:
+                scheduler.step()
             optimizer.zero_grad()
 
         total_loss += loss.item() * config.gradient_accumulation_steps

@@ -462,21 +462,9 @@ class MedicalBLIP2(nn.Module):
                 image_features = self.image_encoder(
                     pixel_values=pixel_values
                 ).last_hidden_state
-            if self._using_pretrained_qformer:
-                image_proj = self.qformer_encoder_proj(image_features)
-                batch_size = image_features.shape[0]
-                qt = self.query_tokens.expand(batch_size, -1, -1)
-                img_mask = torch.ones(batch_size, image_proj.shape[1],
-                                      dtype=torch.long, device=pixel_values.device)
-                qf_out = self.qformer(
-                    query_embeds=qt,
-                    encoder_hidden_states=image_proj,
-                    encoder_attention_mask=img_mask,
-                    return_dict=True,
-                )
-                pooled = qf_out.last_hidden_state.mean(dim=1)
-            else:
-                pooled = self.qformer(image_features).mean(dim=1)
+            # Use get_visual_embeds which handles both pretrained and fallback
+            visual_embeds = self.get_visual_embeds(pixel_values)
+            pooled = visual_embeds.mean(dim=1)
 
         logits = self.question_type_head(pooled)  # [B, 2]
         probs = F.softmax(logits, dim=-1)
@@ -542,21 +530,25 @@ class MedicalBLIP2(nn.Module):
             qt_logits, _, _ = self.classify_question_type(
                 pixel_values, input_ids, attention_mask
             )
-            qt_loss = F.cross_entropy(qt_logits, question_type_labels)
+            # ignore_index=-1 skips report/unknown samples
+            qt_loss = F.cross_entropy(qt_logits, question_type_labels, ignore_index=-1)
             # Weight the auxiliary loss
             outputs.loss = outputs.loss + 0.1 * qt_loss
 
         # Add answer–report consistency loss
         if (consistency_labels is not None and answer_ids is not None
                 and report_ids is not None):
-            cons_logits, _ = self.check_consistency(
-                pixel_values, answer_ids, report_ids
-            )
-            cons_loss = F.binary_cross_entropy_with_logits(
-                cons_logits.squeeze(-1),
-                consistency_labels.float(),
-            )
-            outputs.loss = outputs.loss + 0.1 * cons_loss
+            # Only compute for samples with valid labels (>= 0)
+            valid_mask = consistency_labels >= 0
+            if valid_mask.any():
+                cons_logits, _ = self.check_consistency(
+                    pixel_values[valid_mask], answer_ids[valid_mask], report_ids[valid_mask]
+                )
+                cons_loss = F.binary_cross_entropy_with_logits(
+                    cons_logits.squeeze(-1),
+                    consistency_labels[valid_mask].float(),
+                )
+                outputs.loss = outputs.loss + 0.1 * cons_loss
 
         return outputs
 
@@ -589,11 +581,9 @@ class MedicalBLIP2(nn.Module):
         # If constrained decoding requested, classify question types
         if constrain_closed:
             with torch.no_grad():
-                img_out = self.image_encoder(pixel_values=pixel_values)
-                qf_out = self.qformer(img_out.last_hidden_state)
-                qf_pooled = qf_out.mean(dim=1)
-                qt_logits = self.question_type_head(qf_pooled)
-                qt_preds = qt_logits.argmax(dim=-1)  # [B]
+                qt_logits, qt_preds, _ = self.classify_question_type(
+                    pixel_values, input_ids, attention_mask
+                )
 
             # If ALL samples in batch are closed-ended, apply constrained decoding
             if (qt_preds == 0).all():
@@ -650,7 +640,7 @@ class MedicalBLIP2(nn.Module):
             [B] confidence scores in [0, 1]
         """
         if not scores:
-            return torch.ones(sequences.shape[0])
+            return torch.ones(sequences.shape[0], device=sequences.device)
 
         batch_size = sequences.shape[0]
         all_probs = []
@@ -677,7 +667,7 @@ class MedicalBLIP2(nn.Module):
                 all_probs.append(token_probs)
 
         if not all_probs:
-            return torch.ones(batch_size)
+            return torch.ones(batch_size, device=sequences.device)
 
         # Mean probability across all generated tokens
         prob_stack = torch.stack(all_probs, dim=1)  # [B, num_steps]
