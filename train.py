@@ -95,6 +95,12 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
                             report_ids=rpt_ids)
             loss = outputs.loss / config.gradient_accumulation_steps
 
+        # Skip NaN/Inf losses to prevent poisoning the optimizer
+        if not torch.isfinite(loss):
+            logger.warning(f"  Epoch {epoch + 1} | Batch {step + 1} | Non-finite loss, skipping")
+            optimizer.zero_grad()
+            continue
+
         scaler.scale(loss).backward()
 
         if (step + 1) % config.gradient_accumulation_steps == 0:

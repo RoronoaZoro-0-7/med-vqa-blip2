@@ -139,14 +139,16 @@ class QFormer(nn.Module):
         Returns:
             [B, num_query_tokens, hidden_size]
         """
-        encoder_hidden_states = self.encoder_proj(encoder_hidden_states)
+        # Run in float32 to prevent FP16 overflow with random init
+        orig_dtype = encoder_hidden_states.dtype
+        encoder_hidden_states = self.encoder_proj(encoder_hidden_states.float())
         batch_size = encoder_hidden_states.shape[0]
-        hidden_states = self.query_tokens.expand(batch_size, -1, -1)
+        hidden_states = self.query_tokens.float().expand(batch_size, -1, -1)
 
         for layer in self.layers:
             hidden_states = layer(hidden_states, encoder_hidden_states)
 
-        return self.norm(hidden_states)
+        return self.norm(hidden_states).to(orig_dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -188,27 +190,52 @@ class MedicalBLIP2(nn.Module):
         # We finetune ALL its weights for our medical domain.
         blip2_model_name = getattr(config, "blip2_model_name",
                                    "Salesforce/blip2-flan-t5-base")
+        self._using_pretrained_qformer = False
+
+        # Attempt 1: Load full Blip2Model and extract Q-Former
         try:
             from transformers import Blip2Model
             blip2_full = Blip2Model.from_pretrained(blip2_model_name)
             self.qformer = blip2_full.qformer
-            # Copy pretrained query tokens
             self.query_tokens = nn.Parameter(
                 blip2_full.query_tokens.data.clone()
             )
-            # The BLIP-2 Q-Former may have a different hidden size than our config
-            qformer_hidden = self.qformer.config.hidden_size  # typically 768
-            # Encoder projection: vision_hidden → qformer_hidden
+            qformer_hidden = self.qformer.config.hidden_size
             self.qformer_encoder_proj = (
                 nn.Linear(vision_hidden, qformer_hidden)
                 if vision_hidden != qformer_hidden
                 else nn.Identity()
             )
-            del blip2_full  # free memory
+            del blip2_full
             self._using_pretrained_qformer = True
             print(f"  ✓ Loaded pretrained Q-Former from {blip2_model_name}")
-        except Exception as e:
-            print(f"  ⚠ Could not load pretrained Q-Former ({e}), using random init")
+        except Exception as e1:
+            print(f"  ⚠ Blip2Model failed ({e1})")
+
+        # Attempt 2: Load Q-Former standalone via Blip2QFormerModel
+        if not self._using_pretrained_qformer:
+            try:
+                qf_config = Blip2QFormerConfig.from_pretrained(blip2_model_name)
+                qf_config.encoder_hidden_size = vision_hidden
+                self.qformer = Blip2QFormerModel(qf_config)
+                qformer_hidden = qf_config.hidden_size
+                self.query_tokens = nn.Parameter(
+                    torch.zeros(1, config.num_query_tokens, qformer_hidden)
+                )
+                nn.init.trunc_normal_(self.query_tokens, std=0.02)
+                self.qformer_encoder_proj = (
+                    nn.Linear(vision_hidden, qformer_hidden)
+                    if vision_hidden != qformer_hidden
+                    else nn.Identity()
+                )
+                self._using_pretrained_qformer = True
+                print(f"  ✓ Loaded Q-Former config from {blip2_model_name} (weights init)")
+            except Exception as e2:
+                print(f"  ⚠ Blip2QFormerModel failed ({e2})")
+
+        # Attempt 3: Fallback to custom Q-Former with proper init
+        if not self._using_pretrained_qformer:
+            print("  → Using custom Q-Former with Xavier init")
             self.qformer = QFormer(
                 num_query_tokens=config.num_query_tokens,
                 hidden_size=config.qformer_hidden_size,
@@ -219,10 +246,11 @@ class MedicalBLIP2(nn.Module):
                 dropout=config.qformer_dropout,
                 encoder_hidden_size=vision_hidden,
             )
+            # Apply proper weight init to prevent FP16 overflow
+            self.qformer.apply(self._init_weights)
             self.query_tokens = None  # custom QFormer has its own
             self.qformer_encoder_proj = nn.Identity()
             qformer_hidden = config.qformer_hidden_size
-            self._using_pretrained_qformer = False
 
         self._qformer_hidden = qformer_hidden
 
@@ -291,6 +319,27 @@ class MedicalBLIP2(nn.Module):
             )
 
     # ------------------------------------------------------------------
+    # Weight initialization (for randomly initialized modules)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _init_weights(module):
+        """Xavier/Kaiming init for FP16 stability."""
+        if isinstance(module, nn.Linear):
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.LayerNorm):
+            nn.init.ones_(module.weight)
+            nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.MultiheadAttention):
+            nn.init.xavier_uniform_(module.in_proj_weight)
+            if module.in_proj_bias is not None:
+                nn.init.zeros_(module.in_proj_bias)
+            nn.init.xavier_uniform_(module.out_proj.weight)
+            if module.out_proj.bias is not None:
+                nn.init.zeros_(module.out_proj.bias)
+
+    # ------------------------------------------------------------------
     # Ensure frozen encoder stays in eval mode
     # ------------------------------------------------------------------
     def train(self, mode: bool = True):
@@ -328,8 +377,11 @@ class MedicalBLIP2(nn.Module):
             # Custom Q-Former (fallback)
             visual_tokens = self.qformer(image_features)  # [B, num_queries, qf_hidden]
 
-        visual_embeds = self.proj_norm(self.projection(visual_tokens))  # [B, nq, t5_h]
-        return visual_embeds
+        # Project to T5 space — use float32 for stability (prevents FP16 overflow
+        # when Q-Former is randomly initialized)
+        visual_tokens_f32 = visual_tokens.float()
+        visual_embeds = self.proj_norm(self.projection(visual_tokens_f32))
+        return visual_embeds.to(visual_tokens.dtype)
 
     def _build_encoder_inputs(self, pixel_values, input_ids, attention_mask):
         """Concatenate visual embeddings with text embeddings for T5 encoder."""
