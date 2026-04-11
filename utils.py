@@ -21,7 +21,7 @@ class Config:
     # ---- Model ----
     vision_model_name: str = "openai/clip-vit-base-patch16"
     t5_model_name: str = "google/flan-t5-base"
-    blip2_model_name: str = "Salesforce/blip2-flan-t5-base"
+    blip2_model_name: str = "Salesforce/blip2-opt-2.7b"  # Actually exists on HuggingFace
     qt_bert_model_name: str = "google-bert/bert-base-uncased"
     nli_model_name: str = "cross-encoder/nli-deberta-v3-base"
     num_query_tokens: int = 32
@@ -41,7 +41,7 @@ class Config:
     max_input_length: int = 128
     max_target_length: int = 256
     gradient_accumulation_steps: int = 4
-    fp16: bool = True
+    fp16: bool = False  # Disabled for stability with random Q-Former init
     seed: int = 42
     num_workers: int = 2
     max_grad_norm: float = 1.0

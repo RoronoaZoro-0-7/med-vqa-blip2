@@ -193,70 +193,102 @@ class MedicalBLIP2(nn.Module):
         # Load pretrained Q-Former weights from Salesforce BLIP-2.
         # This Q-Former was pretrained on 129M image-text pairs with
         # image-text contrastive, matching, and generation objectives.
-        # We finetune ALL its weights for our medical domain.
+        # We extract ONLY the Q-Former (small) and discard the large LLM.
+        # We finetune all Q-Former weights for our medical domain.
         blip2_model_name = getattr(config, "blip2_model_name",
-                                   "Salesforce/blip2-flan-t5-base")
+                                   "Salesforce/blip2-opt-2.7b")
         self._using_pretrained_qformer = False
 
-        # Attempt 1: Load full Blip2Model and extract Q-Former
-        try:
-            from transformers import Blip2Model
-            blip2_full = Blip2Model.from_pretrained(blip2_model_name)
-            self.qformer = blip2_full.qformer
-            self.query_tokens = nn.Parameter(
-                blip2_full.query_tokens.data.clone()
-            )
-            qformer_hidden = self.qformer.config.hidden_size
-            self.qformer_encoder_proj = (
-                nn.Linear(vision_hidden, qformer_hidden)
-                if vision_hidden != qformer_hidden
-                else nn.Identity()
-            )
-            del blip2_full
-            self._using_pretrained_qformer = True
-            print(f"  ✓ Loaded pretrained Q-Former from {blip2_model_name}")
-        except Exception as e1:
-            print(f"  ⚠ Blip2Model failed ({e1})")
+        # List of BLIP-2 models to try (in order of preference)
+        blip2_models_to_try = [
+            blip2_model_name,
+            "Salesforce/blip2-opt-2.7b",
+            "Salesforce/blip2-flan-t5-xl",
+        ]
 
-        # Attempt 2: Load Q-Former standalone via Blip2QFormerModel
-        if not self._using_pretrained_qformer:
+        # Attempt 1: Load via Blip2ForConditionalGeneration and extract Q-Former
+        for model_name in blip2_models_to_try:
+            if self._using_pretrained_qformer:
+                break
             try:
-                qf_config = Blip2QFormerConfig.from_pretrained(blip2_model_name)
-                qf_config.encoder_hidden_size = vision_hidden
-                self.qformer = Blip2QFormerModel(qf_config)
-                qformer_hidden = qf_config.hidden_size
-                self.query_tokens = nn.Parameter(
-                    torch.zeros(1, config.num_query_tokens, qformer_hidden)
+                from transformers import Blip2ForConditionalGeneration
+                print(f"  Trying to load Q-Former from {model_name}...")
+                blip2_full = Blip2ForConditionalGeneration.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float32,  # Load in fp32 for stability
                 )
-                nn.init.trunc_normal_(self.query_tokens, std=0.02)
+                # Extract only Q-Former components (small, ~100M params)
+                self.qformer = blip2_full.qformer
+                self.query_tokens = nn.Parameter(
+                    blip2_full.query_tokens.data.clone()
+                )
+                qformer_hidden = self.qformer.config.hidden_size  # 768
+                # BLIP-2 vision encoder is EVA-CLIP with 1408 hidden size,
+                # but we use CLIP ViT with 768, so we need projection
+                blip2_vision_hidden = blip2_full.config.vision_config.hidden_size
                 self.qformer_encoder_proj = (
-                    nn.Linear(vision_hidden, qformer_hidden)
-                    if vision_hidden != qformer_hidden
+                    nn.Linear(vision_hidden, blip2_vision_hidden)
+                    if vision_hidden != blip2_vision_hidden
                     else nn.Identity()
                 )
+                # Initialize projection with small weights for stability
+                if isinstance(self.qformer_encoder_proj, nn.Linear):
+                    nn.init.xavier_uniform_(self.qformer_encoder_proj.weight, gain=0.1)
+                    nn.init.zeros_(self.qformer_encoder_proj.bias)
+                # Delete the large LLM part to save memory
+                del blip2_full.language_model
+                del blip2_full
+                import gc; gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 self._using_pretrained_qformer = True
-                print(f"  ✓ Loaded Q-Former config from {blip2_model_name} (weights init)")
-            except Exception as e2:
-                print(f"  ⚠ Blip2QFormerModel failed ({e2})")
+                print(f"  ✓ Loaded pretrained Q-Former from {model_name}")
+            except Exception as e:
+                print(f"  ⚠ {model_name} failed: {e}")
 
-        # Attempt 3: Fallback to custom Q-Former with proper init
+        # Attempt 2: Try Blip2Model (base class)
         if not self._using_pretrained_qformer:
-            print("  → Using custom Q-Former with Xavier init")
-            self.qformer = QFormer(
-                num_query_tokens=config.num_query_tokens,
-                hidden_size=config.qformer_hidden_size,
-                num_heads=config.qformer_num_heads,
-                num_layers=config.qformer_num_layers,
-                intermediate_size=config.qformer_intermediate_size,
-                cross_attention_every=config.qformer_cross_attention_every,
-                dropout=config.qformer_dropout,
-                encoder_hidden_size=vision_hidden,
+            for model_name in blip2_models_to_try:
+                if self._using_pretrained_qformer:
+                    break
+                try:
+                    from transformers import Blip2Model
+                    print(f"  Trying Blip2Model from {model_name}...")
+                    blip2_full = Blip2Model.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float32,
+                    )
+                    self.qformer = blip2_full.qformer
+                    self.query_tokens = nn.Parameter(
+                        blip2_full.query_tokens.data.clone()
+                    )
+                    qformer_hidden = self.qformer.config.hidden_size
+                    blip2_vision_hidden = blip2_full.config.vision_config.hidden_size
+                    self.qformer_encoder_proj = (
+                        nn.Linear(vision_hidden, blip2_vision_hidden)
+                        if vision_hidden != blip2_vision_hidden
+                        else nn.Identity()
+                    )
+                    # Initialize projection with small weights for stability
+                    if isinstance(self.qformer_encoder_proj, nn.Linear):
+                        nn.init.xavier_uniform_(self.qformer_encoder_proj.weight, gain=0.1)
+                        nn.init.zeros_(self.qformer_encoder_proj.bias)
+                    del blip2_full
+                    import gc; gc.collect()
+                    self._using_pretrained_qformer = True
+                    print(f"  ✓ Loaded pretrained Q-Former via Blip2Model from {model_name}")
+                except Exception as e:
+                    print(f"  ⚠ Blip2Model {model_name} failed: {e}")
+
+        # NO FALLBACK TO RANDOM INIT - raise error if all fail
+        if not self._using_pretrained_qformer:
+            raise RuntimeError(
+                "Failed to load pretrained Q-Former from any BLIP-2 model. "
+                "Please check your internet connection and HuggingFace access. "
+                f"Tried: {blip2_models_to_try}"
             )
-            # Apply proper weight init to prevent FP16 overflow
-            self.qformer.apply(self._init_weights)
-            self.query_tokens = None  # custom QFormer has its own
-            self.qformer_encoder_proj = nn.Identity()
-            qformer_hidden = config.qformer_hidden_size
+
+        qformer_hidden = self.qformer.config.hidden_size
 
         self._qformer_hidden = qformer_hidden
 
