@@ -21,7 +21,7 @@ import torch
 from torch.amp import autocast, GradScaler
 from torch.optim import AdamW
 from tqdm import tqdm
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import hf_hub_download
 
 from utils import (
     Config,
@@ -291,46 +291,26 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None):
     return ckpt.get("epoch", 0), ckpt.get("metrics", {})
 
 
-def upload_to_huggingface(checkpoint_path, repo_id, token=None, logger=None):
-    """Upload checkpoint to HuggingFace Hub."""
+def download_from_huggingface(repo_id, filename, cache_dir="hf_cache", logger=None):
+    """Download checkpoint from HuggingFace Hub."""
     try:
-        api = HfApi()
-        hf_token = token or os.environ.get("HF_TOKEN")
-        
-        if not hf_token:
-            if logger:
-                logger.warning("No HuggingFace token provided. Set --hf_token or HF_TOKEN env var.")
-            return False
-        
-        # Create repo if it doesn't exist
-        try:
-            create_repo(repo_id, token=hf_token, exist_ok=True, private=False)
-            if logger:
-                logger.info(f"  HuggingFace repo ready: {repo_id}")
-        except Exception as e:
-            if logger:
-                logger.info(f"  Repo exists or created: {repo_id}")
-        
-        # Upload the checkpoint file
-        filename = os.path.basename(checkpoint_path)
         if logger:
-            logger.info(f"  Uploading {filename} to HuggingFace...")
+            logger.info(f"  Downloading {filename} from HuggingFace ({repo_id})...")
         
-        api.upload_file(
-            path_or_fileobj=checkpoint_path,
-            path_in_repo=filename,
+        local_path = hf_hub_download(
             repo_id=repo_id,
-            token=hf_token,
+            filename=filename,
+            cache_dir=cache_dir,
         )
         
         if logger:
-            logger.info(f"  ✓ Uploaded to https://huggingface.co/{repo_id}")
-        return True
+            logger.info(f"  ✓ Downloaded to {local_path}")
+        return local_path
         
     except Exception as e:
         if logger:
-            logger.error(f"  HuggingFace upload failed: {e}")
-        return False
+            logger.error(f"  HuggingFace download failed: {e}")
+        return None
 
 
 # ======================================================================
@@ -346,10 +326,10 @@ def main():
     parser.add_argument("--fp16", action="store_true", default=None)
     parser.add_argument("--no_fp16", action="store_true")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from")
-    parser.add_argument("--hf_repo", type=str, default=None, 
-                        help="HuggingFace repo to upload weights (e.g., 'username/med-vqa-weights')")
-    parser.add_argument("--hf_token", type=str, default=None,
-                        help="HuggingFace token (or set HF_TOKEN env var)")
+    parser.add_argument("--hf_weights", type=str, default=None,
+                        help="Checkpoint filename to download from HuggingFace (e.g., 'checkpoint_epoch_1.pt')")
+    parser.add_argument("--hf_repo", type=str, default="roronoazoro07/med-vqa-weights",
+                        help="HuggingFace repo ID (default: roronoazoro07/med-vqa-weights)")
     args = parser.parse_args()
 
     # ---- Config ----
@@ -412,11 +392,21 @@ def main():
     start_epoch = 0
     best_metric = -1.0
 
-    # Resume
-    if args.resume and os.path.exists(args.resume):
-        logger.info(f"Resuming from {args.resume}")
+    # Resume from HuggingFace or local checkpoint
+    resume_path = args.resume
+    
+    # Download from HuggingFace if --hf_weights is specified
+    if args.hf_weights:
+        logger.info(f"Downloading weights from HuggingFace: {args.hf_repo}/{args.hf_weights}")
+        resume_path = download_from_huggingface(args.hf_repo, args.hf_weights, logger=logger)
+        if not resume_path:
+            logger.error("Failed to download weights from HuggingFace!")
+            sys.exit(1)
+    
+    if resume_path and os.path.exists(resume_path):
+        logger.info(f"Resuming from {resume_path}")
         start_epoch, prev_metrics = load_checkpoint(
-            args.resume, model, optimizer, scheduler, scaler
+            resume_path, model, optimizer, scheduler, scaler
         )
         start_epoch += 1
         best_metric = prev_metrics.get("vqa_accuracy", -1.0)
@@ -474,16 +464,6 @@ def main():
                     dst = os.path.join(kaggle_out, src_name)
                     shutil.copy2(src, dst)
             logger.info(f"  Kaggle: checkpoints copied to {kaggle_out}")
-
-        # Upload to HuggingFace if repo is specified
-        if args.hf_repo:
-            logger.info("  Uploading checkpoint to HuggingFace...")
-            upload_to_huggingface(ckpt_path, args.hf_repo, args.hf_token, logger)
-            # Also upload best model if it was updated
-            if current_metric > best_metric - 0.0001:  # was just saved
-                best_ckpt = os.path.join(config.checkpoint_dir, "best_model.pt")
-                if os.path.exists(best_ckpt):
-                    upload_to_huggingface(best_ckpt, args.hf_repo, args.hf_token, logger)
 
     # ---- Final evaluation on test set ----
     test_metrics = {}
