@@ -21,6 +21,7 @@ import torch
 from torch.amp import autocast, GradScaler
 from torch.optim import AdamW
 from tqdm import tqdm
+from huggingface_hub import HfApi, create_repo
 
 from utils import (
     Config,
@@ -290,6 +291,48 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None):
     return ckpt.get("epoch", 0), ckpt.get("metrics", {})
 
 
+def upload_to_huggingface(checkpoint_path, repo_id, token=None, logger=None):
+    """Upload checkpoint to HuggingFace Hub."""
+    try:
+        api = HfApi()
+        hf_token = token or os.environ.get("HF_TOKEN")
+        
+        if not hf_token:
+            if logger:
+                logger.warning("No HuggingFace token provided. Set --hf_token or HF_TOKEN env var.")
+            return False
+        
+        # Create repo if it doesn't exist
+        try:
+            create_repo(repo_id, token=hf_token, exist_ok=True, private=False)
+            if logger:
+                logger.info(f"  HuggingFace repo ready: {repo_id}")
+        except Exception as e:
+            if logger:
+                logger.info(f"  Repo exists or created: {repo_id}")
+        
+        # Upload the checkpoint file
+        filename = os.path.basename(checkpoint_path)
+        if logger:
+            logger.info(f"  Uploading {filename} to HuggingFace...")
+        
+        api.upload_file(
+            path_or_fileobj=checkpoint_path,
+            path_in_repo=filename,
+            repo_id=repo_id,
+            token=hf_token,
+        )
+        
+        if logger:
+            logger.info(f"  ✓ Uploaded to https://huggingface.co/{repo_id}")
+        return True
+        
+    except Exception as e:
+        if logger:
+            logger.error(f"  HuggingFace upload failed: {e}")
+        return False
+
+
 # ======================================================================
 # Main
 # ======================================================================
@@ -303,6 +346,10 @@ def main():
     parser.add_argument("--fp16", action="store_true", default=None)
     parser.add_argument("--no_fp16", action="store_true")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from")
+    parser.add_argument("--hf_repo", type=str, default=None, 
+                        help="HuggingFace repo to upload weights (e.g., 'username/med-vqa-weights')")
+    parser.add_argument("--hf_token", type=str, default=None,
+                        help="HuggingFace token (or set HF_TOKEN env var)")
     args = parser.parse_args()
 
     # ---- Config ----
@@ -427,6 +474,16 @@ def main():
                     dst = os.path.join(kaggle_out, src_name)
                     shutil.copy2(src, dst)
             logger.info(f"  Kaggle: checkpoints copied to {kaggle_out}")
+
+        # Upload to HuggingFace if repo is specified
+        if args.hf_repo:
+            logger.info("  Uploading checkpoint to HuggingFace...")
+            upload_to_huggingface(ckpt_path, args.hf_repo, args.hf_token, logger)
+            # Also upload best model if it was updated
+            if current_metric > best_metric - 0.0001:  # was just saved
+                best_ckpt = os.path.join(config.checkpoint_dir, "best_model.pt")
+                if os.path.exists(best_ckpt):
+                    upload_to_huggingface(best_ckpt, args.hf_repo, args.hf_token, logger)
 
     # ---- Final evaluation on test set ----
     test_metrics = {}

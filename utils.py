@@ -33,7 +33,7 @@ class Config:
     qformer_dropout: float = 0.1
 
     # ---- Training ----
-    epochs: int = 10
+    epochs: int = 1  # Run 1 epoch then upload to HuggingFace
     batch_size: int = 4
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
