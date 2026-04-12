@@ -410,6 +410,10 @@ def main():
         )
         start_epoch += 1
         best_metric = prev_metrics.get("vqa_accuracy", -1.0)
+        # Adjust epochs to run 1 more epoch from checkpoint
+        if config.epochs <= start_epoch:
+            config.epochs = start_epoch + 1
+            logger.info(f"  Adjusted epochs to {config.epochs} (will train epoch {start_epoch + 1})")
 
     # ---- Training ----
     logger.info("Starting training …")
