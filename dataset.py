@@ -195,12 +195,9 @@ def download_slake(data_dir: str) -> Dict[str, List[dict]]:
             for src_split, tgt_split in split_map.items():
                 for idx, sample in enumerate(ds[src_split]):
                     try:
-                        img_key = (
-                            "image"
-                            if "image" in sample
-                            else next(
-                                (k for k in sample if "img" in k.lower()), None
-                            )
+                        # Case-insensitive image key lookup
+                        img_key = next(
+                            (k for k in sample if k.lower() == "image" or "img" in k.lower()), None
                         )
                         if img_key is None:
                             continue

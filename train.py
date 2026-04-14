@@ -32,6 +32,9 @@ from utils import (
     compute_rouge,
     parse_json_output,
     visualize_predictions,
+    visualize_results_comparison,
+    visualize_detailed_metrics,
+    visualize_training_history,
     create_results_table,
 )
 from model import MedicalBLIP2
@@ -534,6 +537,37 @@ def main():
     # Save training history
     hist_df = pd.DataFrame(history)
     hist_df.to_csv(os.path.join(config.output_dir, "training_history.csv"), index=False)
+
+    # ==================================================================
+    # Generate Visualizations
+    # ==================================================================
+    logger.info("Generating visualizations...")
+    
+    # 1. Results comparison (Actual vs Reference)
+    if test_metrics:
+        try:
+            comparison_path = os.path.join(config.output_dir, "results_comparison.png")
+            visualize_results_comparison(test_metrics, comparison_path)
+            logger.info(f"  Results comparison saved → {comparison_path}")
+        except Exception as e:
+            logger.warning(f"  Results comparison visualization failed: {e}")
+        
+        # 2. Detailed metrics visualization
+        try:
+            detailed_path = os.path.join(config.output_dir, "detailed_metrics.png")
+            visualize_detailed_metrics(test_metrics, detailed_path)
+            logger.info(f"  Detailed metrics saved → {detailed_path}")
+        except Exception as e:
+            logger.warning(f"  Detailed metrics visualization failed: {e}")
+    
+    # 3. Training history curves
+    if len(history) > 0:
+        try:
+            history_path = os.path.join(config.output_dir, "training_curves.png")
+            visualize_training_history(hist_df, history_path)
+            logger.info(f"  Training curves saved → {history_path}")
+        except Exception as e:
+            logger.warning(f"  Training curves visualization failed: {e}")
 
     # ==================================================================
     # Kaggle: Copy all outputs to /kaggle/working for persistence
