@@ -407,13 +407,31 @@ def main():
     # Resume from HuggingFace or local checkpoint
     resume_path = args.resume
     
-    # Download from HuggingFace if --hf_weights is specified
-    if args.hf_weights:
-        logger.info(f"Downloading weights from HuggingFace: {args.hf_repo}/{args.hf_weights}")
-        resume_path = download_from_huggingface(args.hf_repo, args.hf_weights, logger=logger)
-        if not resume_path:
-            logger.error("Failed to download weights from HuggingFace!")
-            sys.exit(1)
+    # Download from HuggingFace if --hf_repo is specified
+    if args.hf_repo and not args.resume:
+        # Auto-detect latest checkpoint if no specific file given
+        if not args.hf_weights:
+            from huggingface_hub import list_repo_files
+            try:
+                files = list_repo_files(args.hf_repo)
+                checkpoints = [f for f in files if f.startswith("checkpoint_epoch_") and f.endswith(".pt")]
+                if checkpoints:
+                    # Sort by epoch number and get the latest
+                    checkpoints.sort(key=lambda x: int(x.split("_")[-1].replace(".pt", "")))
+                    args.hf_weights = checkpoints[-1]
+                    logger.info(f"Auto-detected latest checkpoint: {args.hf_weights}")
+                else:
+                    logger.warning(f"No checkpoints found in {args.hf_repo}, starting from scratch")
+            except Exception as e:
+                logger.warning(f"Could not list repo files: {e}, starting from scratch")
+        
+        # Download the checkpoint
+        if args.hf_weights:
+            logger.info(f"Downloading weights from HuggingFace: {args.hf_repo}/{args.hf_weights}")
+            resume_path = download_from_huggingface(args.hf_repo, args.hf_weights, logger=logger)
+            if not resume_path:
+                logger.error("Failed to download weights from HuggingFace!")
+                sys.exit(1)
     
     if resume_path and os.path.exists(resume_path):
         logger.info(f"Resuming from {resume_path}")
