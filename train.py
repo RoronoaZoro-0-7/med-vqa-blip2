@@ -278,6 +278,18 @@ def evaluate(model, loader, tokenizer, device, config, logger, desc="Val"):
 # ======================================================================
 
 def save_checkpoint(model, optimizer, scheduler, scaler, epoch, metrics, path):
+    # Delete old epoch checkpoints to save disk space (keep only last 1)
+    if "checkpoint_epoch_" in os.path.basename(path):
+        checkpoint_dir = os.path.dirname(path)
+        current_epoch = epoch
+        # Delete checkpoints from 2 epochs ago
+        old_checkpoint = os.path.join(checkpoint_dir, f"checkpoint_epoch_{current_epoch - 1}.pt")
+        if os.path.exists(old_checkpoint):
+            try:
+                os.remove(old_checkpoint)
+            except Exception as e:
+                pass  # Ignore errors
+    
     torch.save(
         {
             "epoch": epoch,
@@ -512,15 +524,22 @@ def main():
             save_checkpoint(model, optimizer, scheduler, scaler, epoch, val_metrics, best_path)
             logger.info(f"  ★ New best model saved (metric={best_metric:.4f})")
 
-        # Kaggle: copy checkpoints to /kaggle/working so they persist as output
+        # Kaggle: copy ONLY latest checkpoint to save disk space
         if os.path.exists("/kaggle/working"):
             kaggle_out = "/kaggle/working"
-            for src_name in [f"checkpoint_epoch_{epoch + 1}.pt", "best_model.pt"]:
-                src = os.path.join(config.checkpoint_dir, src_name)
-                if os.path.exists(src):
-                    dst = os.path.join(kaggle_out, src_name)
-                    shutil.copy2(src, dst)
-            logger.info(f"  Kaggle: checkpoints copied to {kaggle_out}")
+            # Only copy the current epoch checkpoint (not old ones)
+            src = os.path.join(config.checkpoint_dir, f"checkpoint_epoch_{epoch + 1}.pt")
+            if os.path.exists(src):
+                dst = os.path.join(kaggle_out, f"checkpoint_epoch_{epoch + 1}.pt")
+                # Delete old checkpoint from /kaggle/working first
+                old_dst = os.path.join(kaggle_out, f"checkpoint_epoch_{epoch}.pt")
+                if os.path.exists(old_dst):
+                    try:
+                        os.remove(old_dst)
+                    except:
+                        pass
+                shutil.copy2(src, dst)
+                logger.info(f"  Kaggle: checkpoint copied to {kaggle_out}")
 
     # ---- Final evaluation on test set ----
     test_metrics = {}
