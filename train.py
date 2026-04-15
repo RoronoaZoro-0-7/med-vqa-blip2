@@ -558,17 +558,16 @@ def main():
         # Results table
         rows = []
         for pred, target, task in zip(test_preds, test_targets, test_tasks):
-            parsed_pred = parse_json_output(pred)
-            parsed_tgt = parse_json_output(target)
+            # Plain text format - no JSON parsing needed
             rows.append(
                 {
                     "task": task,
                     "ground_truth": target,
                     "prediction": pred,
-                    "pred_answer": parsed_pred.get("answer", ""),
-                    "gt_answer": parsed_tgt.get("answer", ""),
-                    "pred_report": parsed_pred.get("report", ""),
-                    "gt_report": parsed_tgt.get("report", ""),
+                    "pred_answer": pred.strip(),
+                    "gt_answer": target.strip(),
+                    "pred_report": pred.strip() if task == "report" else "",
+                    "gt_report": target.strip() if task == "report" else "",
                 }
             )
         df = create_results_table(rows)
