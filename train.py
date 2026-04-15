@@ -545,7 +545,7 @@ def main():
     test_metrics = {}
     test_preds, test_targets, test_tasks = [], [], []
     if test_loader:
-        logger.info("Evaluating on test set …")
+        # logger.info("Evaluating on test set …")
         best_ckpt = os.path.join(config.checkpoint_dir, "best_model.pt")
         if os.path.exists(best_ckpt):
             load_checkpoint(best_ckpt, model)
