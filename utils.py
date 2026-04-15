@@ -479,3 +479,221 @@ def create_results_table(results: List[Dict]):
     import pandas as pd
 
     return pd.DataFrame(results)
+
+
+def visualize_confusion_matrix(y_true: List, y_pred: List, labels: List[str], save_path: str, title: str = "Confusion Matrix"):
+    """Create and save confusion matrix visualization."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import confusion_matrix
+    
+    cm = confusion_matrix(y_true, y_pred, labels=range(len(labels)))
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+    
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           xticklabels=labels, yticklabels=labels,
+           title=title,
+           ylabel='True Label',
+           xlabel='Predicted Label')
+    
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    
+    # Add text annotations
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], 'd'),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black")
+    
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def visualize_batch_loss(batch_losses: List[float], epoch: int, save_path: str):
+    """Create per-batch loss curve for an epoch."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    
+    fig, ax = plt.subplots(figsize=(12, 5))
+    
+    batches = range(1, len(batch_losses) + 1)
+    ax.plot(batches, batch_losses, 'b-', linewidth=0.5, alpha=0.7)
+    
+    # Add smoothed line (moving average)
+    window = min(50, len(batch_losses) // 10 + 1)
+    if window > 1:
+        smoothed = np.convolve(batch_losses, np.ones(window)/window, mode='valid')
+        ax.plot(range(window//2 + 1, len(batch_losses) - window//2 + 1), smoothed, 
+                'r-', linewidth=2, label=f'Smoothed (window={window})')
+        ax.legend()
+    
+    ax.set_xlabel('Batch', fontsize=12)
+    ax.set_ylabel('Loss', fontsize=12)
+    ax.set_title(f'Loss per Batch - Epoch {epoch}', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    
+    # Add stats
+    stats_text = f"Start: {batch_losses[0]:.4f}\nEnd: {batch_losses[-1]:.4f}\nMin: {min(batch_losses):.4f}\nMean: {np.mean(batch_losses):.4f}"
+    ax.text(0.98, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def visualize_metrics_table(metrics: Dict, save_path: str, title: str = "Results Summary"):
+    """Create a visual table of metrics."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.axis('off')
+    
+    # Prepare data
+    rows = []
+    for key, value in metrics.items():
+        if isinstance(value, float):
+            rows.append([key.replace('_', ' ').title(), f"{value:.4f}"])
+        else:
+            rows.append([key.replace('_', ' ').title(), str(value)])
+    
+    # Create table
+    table = ax.table(cellText=rows,
+                     colLabels=['Metric', 'Value'],
+                     cellLoc='center',
+                     loc='center',
+                     colWidths=[0.5, 0.3])
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(11)
+    table.scale(1.2, 1.8)
+    
+    # Style header
+    for (i, j), cell in table.get_celld().items():
+        if i == 0:
+            cell.set_text_props(fontweight='bold')
+            cell.set_facecolor('#4CAF50')
+            cell.set_text_props(color='white')
+        elif i % 2 == 0:
+            cell.set_facecolor('#f0f0f0')
+    
+    plt.title(title, fontsize=16, fontweight='bold', pad=20)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def visualize_sample_predictions_grid(samples: List[Dict], save_path: str, title: str = "Sample Predictions"):
+    """Create a grid visualization of sample predictions with images."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    
+    n = min(len(samples), 9)
+    if n == 0:
+        return
+    
+    cols = 3
+    rows = (n + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 5 * rows))
+    axes = np.array(axes).reshape(-1) if rows > 1 or cols > 1 else [axes]
+    
+    for i in range(n):
+        ax = axes[i]
+        s = samples[i]
+        
+        if 'image' in s and s['image'] is not None:
+            ax.imshow(s['image'], cmap='gray')
+        else:
+            ax.text(0.5, 0.5, "No Image", ha='center', va='center', fontsize=12)
+        
+        ax.set_xticks([])
+        ax.set_yticks([])
+        
+        # Build title
+        title_parts = []
+        if 'question' in s:
+            q = s['question'][:50] + ('...' if len(s.get('question', '')) > 50 else '')
+            title_parts.append(f"Q: {q}")
+        if 'ground_truth' in s:
+            gt = str(s['ground_truth'])[:30]
+            title_parts.append(f"GT: {gt}")
+        if 'prediction' in s:
+            pred = str(s['prediction'])[:30]
+            title_parts.append(f"Pred: {pred}")
+        
+        # Color based on correctness
+        is_correct = str(s.get('prediction', '')).lower().strip() == str(s.get('ground_truth', '')).lower().strip()
+        color = 'green' if is_correct else 'red'
+        
+        ax.set_title("\n".join(title_parts), fontsize=8, color=color, wrap=True)
+        
+        # Add border color
+        for spine in ax.spines.values():
+            spine.set_edgecolor(color)
+            spine.set_linewidth(3)
+    
+    # Hide unused axes
+    for i in range(n, len(axes)):
+        axes[i].axis('off')
+    
+    plt.suptitle(title, fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def visualize_all_epoch_losses(all_epoch_losses: Dict[int, List[float]], save_path: str):
+    """Create combined loss curves for all epochs."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Left: All epochs overlaid
+    ax1 = axes[0]
+    colors = plt.cm.viridis(np.linspace(0, 1, len(all_epoch_losses)))
+    
+    for (epoch, losses), color in zip(sorted(all_epoch_losses.items()), colors):
+        # Downsample for plotting
+        step = max(1, len(losses) // 500)
+        x = range(0, len(losses), step)
+        y = [losses[i] for i in x]
+        ax1.plot(x, y, color=color, linewidth=1.5, alpha=0.8, label=f"Epoch {epoch}")
+    
+    ax1.set_xlabel('Batch', fontsize=12)
+    ax1.set_ylabel('Loss', fontsize=12)
+    ax1.set_title('Loss Curves - All Epochs Overlaid', fontsize=14, fontweight='bold')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+    
+    # Right: Mean loss per epoch
+    ax2 = axes[1]
+    epochs = sorted(all_epoch_losses.keys())
+    mean_losses = [np.mean(all_epoch_losses[e]) for e in epochs]
+    final_losses = [all_epoch_losses[e][-1] for e in epochs]
+    
+    ax2.bar([e - 0.2 for e in epochs], mean_losses, width=0.4, label='Mean Loss', color='#3498db')
+    ax2.bar([e + 0.2 for e in epochs], final_losses, width=0.4, label='Final Loss', color='#2ecc71')
+    ax2.set_xlabel('Epoch', fontsize=12)
+    ax2.set_ylabel('Loss', fontsize=12)
+    ax2.set_title('Loss Summary per Epoch', fontsize=14, fontweight='bold')
+    ax2.legend()
+    ax2.set_xticks(epochs)
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()

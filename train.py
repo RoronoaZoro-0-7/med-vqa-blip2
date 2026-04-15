@@ -35,6 +35,11 @@ from utils import (
     visualize_results_comparison,
     visualize_detailed_metrics,
     visualize_training_history,
+    visualize_confusion_matrix,
+    visualize_batch_loss,
+    visualize_metrics_table,
+    visualize_sample_predictions_grid,
+    visualize_all_epoch_losses,
     create_results_table,
 )
 from model import MedicalBLIP2
@@ -67,6 +72,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
     model.train()
     total_loss = 0.0
     num_steps = 0
+    batch_losses = []  # Track loss per batch for visualization
     optimizer.zero_grad()
 
     pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{config.epochs} [Train]", leave=False)
@@ -105,6 +111,9 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
             optimizer.zero_grad()
             continue
 
+        # Track batch loss
+        batch_losses.append(loss.item() * config.gradient_accumulation_steps)
+
         scaler.scale(loss).backward()
 
         if (step + 1) % config.gradient_accumulation_steps == 0:
@@ -133,7 +142,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
                 f"Loss {avg:.4f} | LR {lr:.2e}"
             )
 
-    return total_loss / max(num_steps, 1)
+    return total_loss / max(num_steps, 1), batch_losses
 
 
 # ======================================================================
@@ -421,12 +430,24 @@ def main():
     # ---- Training ----
     logger.info("Starting training …")
     history = []
+    all_epoch_batch_losses = {}  # Store batch losses per epoch for visualization
     for epoch in range(start_epoch, config.epochs):
         t0 = time.time()
-        train_loss = train_one_epoch(
+        train_loss, batch_losses = train_one_epoch(
             model, train_loader, optimizer, scheduler, scaler, device, config, logger, epoch
         )
         elapsed = time.time() - t0
+        
+        # Store batch losses for this epoch
+        all_epoch_batch_losses[epoch + 1] = batch_losses
+        
+        # Save batch loss visualization for this epoch
+        try:
+            batch_loss_path = os.path.join(config.output_dir, f"batch_loss_epoch_{epoch + 1}.png")
+            visualize_batch_loss(batch_losses, epoch + 1, batch_loss_path)
+            logger.info(f"  Batch loss curve saved → {batch_loss_path}")
+        except Exception as e:
+            logger.warning(f"  Batch loss visualization failed: {e}")
 
         # Validate
         val_metrics, val_preds, val_targets, val_tasks = evaluate(
@@ -568,6 +589,61 @@ def main():
             logger.info(f"  Training curves saved → {history_path}")
         except Exception as e:
             logger.warning(f"  Training curves visualization failed: {e}")
+
+    # 4. All epoch batch losses combined
+    if len(all_epoch_batch_losses) > 0:
+        try:
+            all_epochs_path = os.path.join(config.output_dir, "all_epochs_batch_loss.png")
+            visualize_all_epoch_losses(all_epoch_batch_losses, all_epochs_path)
+            logger.info(f"  All epochs batch loss saved → {all_epochs_path}")
+        except Exception as e:
+            logger.warning(f"  All epochs batch loss visualization failed: {e}")
+
+    # 5. Metrics table visualization
+    if test_metrics:
+        try:
+            metrics_table_path = os.path.join(config.output_dir, "metrics_table.png")
+            visualize_metrics_table(test_metrics, metrics_table_path)
+            logger.info(f"  Metrics table saved → {metrics_table_path}")
+        except Exception as e:
+            logger.warning(f"  Metrics table visualization failed: {e}")
+
+    # 6. Confusion matrix for question types (if available)
+    if test_loader and len(test_preds) > 0:
+        try:
+            # Build confusion data from question type predictions
+            qt_preds = []
+            qt_trues = []
+            for pred, target in zip(test_preds, test_targets):
+                parsed_pred = parse_json_output(pred)
+                parsed_tgt = parse_json_output(target)
+                if "question_type" in parsed_pred and "question_type" in parsed_tgt:
+                    qt_preds.append(parsed_pred["question_type"])
+                    qt_trues.append(parsed_tgt["question_type"])
+            
+            if len(qt_preds) > 0:
+                confusion_path = os.path.join(config.output_dir, "confusion_matrix.png")
+                visualize_confusion_matrix(qt_trues, qt_preds, confusion_path)
+                logger.info(f"  Confusion matrix saved → {confusion_path}")
+        except Exception as e:
+            logger.warning(f"  Confusion matrix visualization failed: {e}")
+
+    # 7. Sample predictions grid
+    if test_loader and len(test_preds) > 0:
+        try:
+            sample_data = []
+            for i, (pred, target, task) in enumerate(zip(test_preds[:16], test_targets[:16], test_tasks[:16])):
+                sample_data.append({
+                    "prediction": pred,
+                    "ground_truth": target,
+                    "task": task
+                })
+            if len(sample_data) > 0:
+                grid_path = os.path.join(config.output_dir, "predictions_grid.png")
+                visualize_sample_predictions_grid(sample_data, grid_path)
+                logger.info(f"  Predictions grid saved → {grid_path}")
+        except Exception as e:
+            logger.warning(f"  Predictions grid visualization failed: {e}")
 
     # ==================================================================
     # Kaggle: Copy all outputs to /kaggle/working for persistence
