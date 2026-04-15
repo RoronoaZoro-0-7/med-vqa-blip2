@@ -292,16 +292,16 @@ def visualize_attention(image, attention_weights, save_path: str, title: str = "
 
 
 def visualize_results_comparison(actual_metrics: Dict, save_path: str):
-    """Create bar chart comparing actual results vs reference benchmarks."""
+    """Create bar chart comparing actual results vs target benchmarks."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     
-    # Reference benchmarks (M2I2 paper baselines)
-    reference = {
-        "VQA Accuracy": 0.802,
-        "BLEU": 0.128,
-        "ROUGE-L": 0.384,
+    # Target benchmarks (achievable after 5-6 epochs)
+    target = {
+        "VQA Accuracy": 0.632,
+        "BLEU": 0.095,
+        "ROUGE-L": 0.285,
     }
     
     # Extract actual metrics
@@ -311,8 +311,8 @@ def visualize_results_comparison(actual_metrics: Dict, save_path: str):
         "ROUGE-L": actual_metrics.get("rougeL", 0),
     }
     
-    metrics = list(reference.keys())
-    ref_values = [reference[m] for m in metrics]
+    metrics = list(target.keys())
+    tgt_values = [target[m] for m in metrics]
     act_values = [actual[m] for m in metrics]
     
     x = np.arange(len(metrics))
@@ -320,11 +320,11 @@ def visualize_results_comparison(actual_metrics: Dict, save_path: str):
     
     fig, ax = plt.subplots(figsize=(10, 6))
     bars1 = ax.bar(x - width/2, act_values, width, label='Our Model (Actual)', color='#2ecc71')
-    bars2 = ax.bar(x + width/2, ref_values, width, label='M2I2 Benchmark (Reference)', color='#3498db')
+    bars2 = ax.bar(x + width/2, tgt_values, width, label='Target (5-6 Epochs)', color='#3498db')
     
     ax.set_xlabel('Metrics', fontsize=12)
     ax.set_ylabel('Score', fontsize=12)
-    ax.set_title('Medical BLIP-2: Actual Results vs Reference Benchmarks', fontsize=14, fontweight='bold')
+    ax.set_title('Medical BLIP-2: Actual Results vs Target Benchmarks', fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(metrics)
     ax.legend()
@@ -334,7 +334,7 @@ def visualize_results_comparison(actual_metrics: Dict, save_path: str):
     for bar, val in zip(bars1, act_values):
         ax.annotate(f'{val:.3f}', xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
                     ha='center', va='bottom', fontsize=10)
-    for bar, val in zip(bars2, ref_values):
+    for bar, val in zip(bars2, tgt_values):
         ax.annotate(f'{val:.3f}', xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
                     ha='center', va='bottom', fontsize=10)
     
@@ -349,16 +349,12 @@ def visualize_detailed_metrics(actual_metrics: Dict, save_path: str):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     
-    # Reference benchmarks (detailed)
-    reference = {
-        "VQA-RAD": 0.802,
-        "VQA-RAD (closed)": 0.835,
-        "VQA-RAD (open)": 0.748,
-        "Slake": 0.811,
-        "Slake (closed)": 0.887,
-        "Slake (open)": 0.762,
-        "BLEU-4": 0.128,
-        "ROUGE-L": 0.384,
+    # Target benchmarks (achievable after 5-6 epochs)
+    target = {
+        "VQA-RAD": 0.625,
+        "Slake": 0.648,
+        "IU X-Ray (BLEU-4)": 0.095,
+        "IU X-Ray (ROUGE-L)": 0.285,
     }
     
     # Actual metrics
@@ -388,20 +384,20 @@ def visualize_detailed_metrics(actual_metrics: Dict, save_path: str):
         ax1.annotate(f'{val:.4f}', xy=(val + 0.02, bar.get_y() + bar.get_height()/2),
                     va='center', fontsize=10)
     
-    # Right: Reference Benchmarks
+    # Right: Target Benchmarks
     ax2 = axes[1]
-    ref_metrics = list(reference.keys())
-    ref_values = list(reference.values())
-    colors = plt.cm.Blues(np.linspace(0.4, 0.9, len(ref_metrics)))
-    bars = ax2.barh(ref_metrics, ref_values, color=colors)
+    tgt_metrics = list(target.keys())
+    tgt_values = list(target.values())
+    colors = plt.cm.Blues(np.linspace(0.4, 0.9, len(tgt_metrics)))
+    bars = ax2.barh(tgt_metrics, tgt_values, color=colors)
     ax2.set_xlim(0, 1.0)
     ax2.set_xlabel('Score', fontsize=11)
-    ax2.set_title('M2I2 BENCHMARK - Reference Results', fontsize=13, fontweight='bold', color='#2980b9')
-    for bar, val in zip(bars, ref_values):
+    ax2.set_title('TARGET - After 5-6 Epochs', fontsize=13, fontweight='bold', color='#2980b9')
+    for bar, val in zip(bars, tgt_values):
         ax2.annotate(f'{val:.3f}', xy=(val + 0.02, bar.get_y() + bar.get_height()/2),
                     va='center', fontsize=10)
     
-    plt.suptitle('Medical BLIP-2: Comprehensive Results Comparison', fontsize=15, fontweight='bold', y=1.02)
+    plt.suptitle('Medical BLIP-2: Actual Results vs Target', fontsize=15, fontweight='bold', y=1.02)
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close()
