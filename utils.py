@@ -37,7 +37,7 @@ class Config:
     batch_size: int = 4
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    warmup_steps: int = 200
+    warmup_steps: int = 500
     max_input_length: int = 128
     max_target_length: int = 256
     gradient_accumulation_steps: int = 4
@@ -159,10 +159,9 @@ def compute_accuracy(predictions: List[str], references: List[str]) -> float:
         return 0.0
     correct = 0
     for pred, ref in zip(predictions, references):
-        parsed = parse_json_output(pred)
-        pred_ans = parsed.get("answer", pred).strip().lower()
-        ref_parsed = parse_json_output(ref)
-        ref_ans = ref_parsed.get("answer", ref).strip().lower()
+        # Simplified: direct comparison instead of JSON parsing
+        pred_ans = pred.strip().lower()
+        ref_ans = ref.strip().lower()
         if pred_ans == ref_ans:
             correct += 1
     return correct / len(predictions)

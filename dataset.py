@@ -119,7 +119,7 @@ def download_vqa_rad(data_dir: str) -> Dict[str, List[dict]]:
 
                 answer = str(sample["answer"]).strip()
                 question = str(sample["question"]).strip()
-                target = json.dumps({"answer": answer, "explanation": ""})
+                target = answer  # Simplified: plain text instead of JSON
                 q_type = classify_question_type(answer)
 
                 processed[split].append(
@@ -219,9 +219,7 @@ def download_slake(data_dir: str) -> Dict[str, List[dict]]:
 
                         question = str(sample[q_key]).strip()
                         answer = str(sample[a_key]).strip()
-                        target = json.dumps(
-                            {"answer": answer, "explanation": ""}
-                        )
+                        target = answer  # Simplified: plain text instead of JSON
                         q_type = classify_question_type(answer)
 
                         processed[tgt_split].append(
@@ -328,7 +326,7 @@ def download_iu_xray(data_dir: str) -> Dict[str, List[dict]]:
                         if label_key and sample[label_key]
                         else "Normal chest X-ray. No acute cardiopulmonary abnormality."
                     )
-                    target = json.dumps({"report": report})
+                    target = report  # Simplified: plain text instead of JSON
 
                     split = "train" if count < int(max_samples * 0.85) else "test"
                     processed[split].append(
@@ -411,7 +409,7 @@ def _generate_synthetic_report_data(data_dir: str) -> Dict[str, list]:
         report = template_reports[idx % len(template_reports)].format(
             findings=findings, impression=impression
         )
-        target = json.dumps({"report": report})
+        target = report  # Simplified: plain text instead of JSON
         split = "train" if idx < len(items) * 0.85 else "test"
         processed[split].append(
             {
@@ -466,7 +464,7 @@ def generate_synthetic_qa_from_reports(
                 answer = "yes"
             else:
                 answer = "no"
-            target = json.dumps({"answer": answer, "explanation": ""})
+            target = answer  # Simplified: plain text instead of JSON
             qa_samples.append(
                 {
                     "image_path": img_path,
@@ -482,7 +480,7 @@ def generate_synthetic_qa_from_reports(
 
         # Open-ended question
         snippet = report[:200].strip()
-        target = json.dumps({"answer": snippet, "explanation": ""})
+        target = snippet  # Simplified: plain text instead of JSON
         qa_samples.append(
             {
                 "image_path": img_path,

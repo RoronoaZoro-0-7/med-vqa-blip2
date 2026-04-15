@@ -436,7 +436,7 @@ def main():
     if resume_path and os.path.exists(resume_path):
         logger.info(f"Resuming from {resume_path}")
         start_epoch, prev_metrics = load_checkpoint(
-            resume_path, model, optimizer, scheduler, scaler
+            resume_path, model, optimizer, None, None  # Don't load scheduler/scaler - fresh start each run
         )
         start_epoch += 1
         best_metric = prev_metrics.get("vqa_accuracy", -1.0)
@@ -444,6 +444,15 @@ def main():
         if config.epochs <= start_epoch:
             config.epochs = start_epoch + 1
             logger.info(f"  Adjusted epochs to {config.epochs} (will train epoch {start_epoch + 1})")
+        
+        # Recreate scheduler for remaining epochs with fresh learning rate
+        remaining_steps = (
+            len(train_loader) // config.gradient_accumulation_steps * (config.epochs - start_epoch)
+        )
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, config.warmup_steps, remaining_steps
+        )
+        logger.info(f"  Reset scheduler: warmup={config.warmup_steps}, total_steps={remaining_steps}")
 
     # ---- Training ----
     logger.info("Starting training …")
@@ -459,9 +468,11 @@ def main():
         # Store batch losses for this epoch
         all_epoch_batch_losses[epoch + 1] = batch_losses
         
-        # Save batch loss visualization for this epoch
+        # Save batch loss visualization for this epoch in epoch-specific folder
         try:
-            batch_loss_path = os.path.join(config.output_dir, f"batch_loss_epoch_{epoch + 1}.png")
+            epoch_folder = os.path.join(config.output_dir, f"epoch_{epoch + 1}")
+            os.makedirs(epoch_folder, exist_ok=True)
+            batch_loss_path = os.path.join(epoch_folder, "batch_loss.png")
             visualize_batch_loss(batch_losses, epoch + 1, batch_loss_path)
             logger.info(f"  Batch loss curve saved → {batch_loss_path}")
         except Exception as e:
