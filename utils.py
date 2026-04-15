@@ -525,14 +525,13 @@ def visualize_batch_loss(batch_losses: List[float], epoch: int, save_path: str):
     fig, ax = plt.subplots(figsize=(12, 5))
     
     batches = range(1, len(batch_losses) + 1)
-    ax.plot(batches, batch_losses, 'b-', linewidth=0.5, alpha=0.7)
+    ax.plot(batches, batch_losses, 'b-', linewidth=0.5, alpha=0.7, label='Raw Loss')
     
     # Add smoothed line (moving average)
     window = min(50, len(batch_losses) // 10 + 1)
-    if window > 1:
-        smoothed = np.convolve(batch_losses, np.ones(window)/window, mode='valid')
-        ax.plot(range(window//2 + 1, len(batch_losses) - window//2 + 1), smoothed, 
-                'r-', linewidth=2, label=f'Smoothed (window={window})')
+    if window > 1 and len(batch_losses) >= window:
+        smoothed = np.convolve(batch_losses, np.ones(window)/window, mode='same')
+        ax.plot(batches, smoothed, 'r-', linewidth=2, label=f'Smoothed (window={window})')
         ax.legend()
     
     ax.set_xlabel('Batch', fontsize=12)
