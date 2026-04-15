@@ -46,11 +46,15 @@ def load_model(checkpoint_path: str, device=None):
 
     config = Config()
     model = MedicalBLIP2(config)
+    print(f"  Loading checkpoint from {checkpoint_path} (this may take 1-2 minutes)...")
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    print(f"  Checkpoint loaded! Restoring model weights...")
     state_dict = ckpt.get("model_state_dict", ckpt)
     model.load_state_dict(state_dict, strict=False)
+    print(f"  Moving model to {dev}...")
     model.to(dev)
     model.eval()
+    print(f"  Model ready!")
     return model, config, dev
 
 
