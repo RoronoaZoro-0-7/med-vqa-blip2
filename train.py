@@ -134,7 +134,7 @@ def train_one_epoch(model, loader, optimizer, scheduler, scaler, device, config,
         num_steps += 1
         pbar.set_postfix(loss=f"{total_loss / num_steps:.4f}")
 
-        if (step + 1) % 10 == 0:
+        if (step + 1) % 100 == 0:
             avg = total_loss / num_steps
             lr = scheduler.get_last_lr()[0]
             logger.info(

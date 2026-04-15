@@ -114,6 +114,7 @@ def setup_logging(log_dir: str) -> logging.Logger:
     if logger.handlers:
         return logger
     logger.setLevel(logging.INFO)
+    logger.propagate = False  # Prevent duplicate logs to root logger
     fmt = logging.Formatter(
         "%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
