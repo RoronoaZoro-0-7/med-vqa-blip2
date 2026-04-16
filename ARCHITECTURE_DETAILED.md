@@ -264,17 +264,157 @@ Question Text → BERT Encoder → [CLS] Token → MLP Head → [Closed, Open]
 
 ## 📊 Training Details
 
+### Datasets Used
+
+#### Training Data
+
+| Dataset | Task | Split Used | Description |
+|---------|------|------------|-------------|
+| **VQA-RAD** | VQA | `train` | ~2,500 radiology image-question-answer triplets |
+| **SLAKE** | VQA | `train` | ~10,000 medical VQA samples (sememe-enhanced) |
+| **IU X-Ray** | Report Generation | `train` | ~6,000 chest X-ray images with radiology reports |
+| **Synthetic QA** | VQA | Generated | Rule-based QA pairs extracted from IU X-Ray reports |
+
+#### Validation Data
+
+| Dataset | Split Used | Notes |
+|---------|------------|-------|
+| **SLAKE** | `val` | Primary validation set |
+| **Fallback** | 10% of train | Used if SLAKE val not available |
+
+#### Testing Data ✅ (All datasets used for evaluation)
+
+| Dataset | Task | Split Used |
+|---------|------|------------|
+| **VQA-RAD** | VQA | `test` (~1,000 samples) |
+| **SLAKE** | VQA | `test` (~4,000 samples) |
+| **IU X-Ray** | Report Generation | `test` (~1,000 samples) |
+
+---
+
 ### Multi-Task Loss Function
 
-```python
-Total Loss = LM_Loss + 0.1 × QType_Loss + 0.1 × Consistency_Loss
+The model is trained with a **combined loss** from three objectives:
+
+```
+𝓛_total = 𝓛_LM + 0.1 × 𝓛_QType + 0.1 × 𝓛_Consistency
 ```
 
-| Loss Component | Type | Weight | Purpose |
-|----------------|------|--------|---------|
-| **LM Loss** | Cross-Entropy | 1.0 | Main text generation (VQA + Reports) |
-| **QType Loss** | Cross-Entropy (2-class) | 0.1 | Question type classification |
-| **Consistency Loss** | Binary Cross-Entropy | 0.1 | Answer-report agreement |
+---
+
+### Loss 1: Language Model Loss (Main Loss)
+
+**Purpose:** Train the T5 model to generate correct VQA answers and medical reports.
+
+**Formula (Cross-Entropy Loss):**
+
+$$\mathcal{L}_{LM} = -\frac{1}{T} \sum_{t=1}^{T} \log P(y_t | y_{<t}, X)$$
+
+Where:
+- $T$ = number of tokens in target sequence
+- $y_t$ = ground truth token at position $t$
+- $y_{<t}$ = all previous tokens
+- $X$ = input (visual embeddings + text prompt)
+- $P(y_t | y_{<t}, X)$ = model's predicted probability for token $y_t$
+
+**Implementation:**
+```python
+# Built into T5ForConditionalGeneration
+outputs = self.t5_model(inputs_embeds=..., labels=labels)
+lm_loss = outputs.loss  # Cross-entropy over vocabulary
+```
+
+| Property | Value |
+|----------|-------|
+| **Weight** | 1.0 |
+| **Applied To** | All samples (VQA + Report) |
+| **Ignore Index** | -100 (padding tokens) |
+
+---
+
+### Loss 2: Question Type Classification Loss
+
+**Purpose:** Classify questions as closed-ended (yes/no) or open-ended (free-form).
+
+**Formula (Cross-Entropy Loss):**
+
+$$\mathcal{L}_{QType} = -\sum_{c=0}^{1} y_c \log(\hat{y}_c)$$
+
+Where:
+- $c \in \{0, 1\}$ = class (0=closed, 1=open)
+- $y_c$ = ground truth one-hot label
+- $\hat{y}_c$ = predicted probability after softmax
+
+**Expanded:**
+
+$$\mathcal{L}_{QType} = -\log\left(\frac{e^{z_{y}}}{\sum_{j=0}^{1} e^{z_j}}\right)$$
+
+Where $z$ = logits from BERT + MLP head, $y$ = true class.
+
+**Implementation:**
+```python
+qt_logits, _, _ = self.classify_question_type(pixel_values, input_ids, attention_mask)
+qt_loss = F.cross_entropy(qt_logits, question_type_labels, ignore_index=-1)
+```
+
+| Property | Value |
+|----------|-------|
+| **Weight** | 0.1 |
+| **Classes** | 2 (closed=0, open=1) |
+| **Applied To** | VQA samples only |
+| **Ignore Index** | -1 (report samples skipped) |
+
+---
+
+### Loss 3: Answer-Report Consistency Loss
+
+**Purpose:** Ensure the VQA answer and generated report are semantically consistent (not contradictory).
+
+**Formula (Binary Cross-Entropy with Logits):**
+
+$$\mathcal{L}_{Consistency} = -\frac{1}{N}\sum_{i=1}^{N} \left[ y_i \cdot \log(\sigma(z_i)) + (1-y_i) \cdot \log(1-\sigma(z_i)) \right]$$
+
+Where:
+- $N$ = batch size
+- $y_i \in \{0, 1\}$ = ground truth (0=inconsistent, 1=consistent)
+- $z_i$ = raw logit from consistency head
+- $\sigma(z) = \frac{1}{1+e^{-z}}$ = sigmoid function
+
+**Pipeline:**
+1. Answer text + Report text → DeBERTa NLI → 3 logits [contradiction, neutral, entailment]
+2. 3 logits → Linear(3→1) → 1 consistency logit
+3. Apply BCE loss
+
+**Implementation:**
+```python
+cons_logits, _ = self.check_consistency(pixel_values, answer_ids, report_ids)
+cons_loss = F.binary_cross_entropy_with_logits(
+    cons_logits.squeeze(-1),
+    consistency_labels.float()
+)
+```
+
+| Property | Value |
+|----------|-------|
+| **Weight** | 0.1 |
+| **Output** | Single logit → sigmoid → probability |
+| **Applied To** | Samples with both answer AND report |
+| **Skip Condition** | `consistency_labels < 0` |
+
+---
+
+### Combined Loss Summary
+
+| Loss | Formula | Weight | When Applied |
+|------|---------|--------|--------------|
+| **LM Loss** | $-\frac{1}{T}\sum_t \log P(y_t\|y_{<t}, X)$ | **1.0** | All samples |
+| **QType Loss** | $-\sum_c y_c \log(\hat{y}_c)$ | **0.1** | VQA only (label ≥ 0) |
+| **Consistency Loss** | $-[y\log\sigma(z) + (1-y)\log(1-\sigma(z))]$ | **0.1** | Answer+Report pairs only |
+
+**Final Total:**
+$$\boxed{\mathcal{L}_{total} = \mathcal{L}_{LM} + 0.1 \cdot \mathcal{L}_{QType} + 0.1 \cdot \mathcal{L}_{Consistency}}$$
+
+---
 
 ### Training Configuration
 
