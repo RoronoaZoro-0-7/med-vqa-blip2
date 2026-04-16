@@ -768,15 +768,15 @@ def main():
         print("  Metric              | Score")
         print("  --------------------+--------")
         if "vqa_accuracy" in test_metrics:
-            print(f"  VQA Accuracy        | 0.8533")
+            print(f"  VQA Accuracy        | {test_metrics['vqa_accuracy']:.4f}")
         if "question_type_accuracy" in test_metrics:
-            print(f"  QType Cls Accuracy  | 0.9908")
+            print(f"  QType Cls Accuracy  | {test_metrics['question_type_accuracy']:.4f}")
         if "mean_confidence" in test_metrics:
-            print(f"  Mean Confidence     | 0.2903")
+            print(f"  Mean Confidence     | {test_metrics['mean_confidence']:.4f}")
         if "consistency_accuracy" in test_metrics:
-            print(f"  Consistency Acc     | 0.9860")
+            print(f"  Consistency Acc     | {test_metrics['consistency_accuracy']:.4f}")
         if "bleu" in test_metrics:
-            print(f"  BLEU                | 0.2441")
+            print(f"  BLEU                | {test_metrics['bleu']:.4f}")
         if "rouge1" in test_metrics:
             print(f"  ROUGE-1             | {test_metrics['rouge1']:.4f}")
         if "rouge2" in test_metrics:
@@ -802,51 +802,7 @@ def main():
         print("  " + "-" * 65)
 
     print()
-    # print("=" * 70)
-    # print("  Training + Inference COMPLETE.  All outputs saved to:", config.output_dir)
-    # print("=" * 70)
-
-    # # ==================================================================
-    # # Target benchmark results (achievable after 5-6 epochs of training)
-    # # ==================================================================
-    # print()
-    # print("=" * 70)
-    # # print("         TARGET BENCHMARK RESULTS (After 5-6 Epochs)")
-    # print("=" * 70)
-    # print()
-    # print("  Dataset          | Task     | Metric        | Target")
-    # print("  -----------------+----------+---------------+--------")
-    # print("  VQA-RAD          | VQA      | Accuracy      | 62.5%")
-    # print("  Slake            | VQA      | Accuracy      | 64.8%")
-    # print("  IU X-Ray         | Report   | BLEU-4        | 0.095")
-    # print("  IU X-Ray         | Report   | ROUGE-L       | 0.285")
-    # print("  -----------------+----------+---------------+--------")
-    # print("  Overall VQA      | VQA      | Accuracy      | 63.2%")
-    # print("  Overall Report   | Report   | BLEU-4        | 0.095")
-    # print()
-    # print("  Sample Predictions:")
-    # print("  ┌─────────────────────────────────────────────────────────────────┐")
-    # print('  │ Q: Is there cardiomegaly?              → Pred: yes   GT: yes  │')
-    # print('  │ Q: Is there a fracture?                → Pred: no    GT: no   │')
-    # print('  │ Q: What organ is this?                 → Pred: lung  GT: lung │')
-    # print('  │ Q: What modality is this?              → Pred: CT    GT: CT   │')
-    # print('  │ Q: Is there pleural effusion?          → Pred: no    GT: no   │')
-    # print("  └─────────────────────────────────────────────────────────────────┘")
-    # print()
-    # print("  Report Generation Sample :")
-    # print("  ┌─────────────────────────────────────────────────────────────────┐")
-    # print("  │ Input : chest X-ray image                                      │")
-    # print("  │ Report: The cardiac silhouette is within normal limits.         │")
-    # print("  │         No acute cardiopulmonary abnormality. The lungs are     │")
-    # print("  │         clear bilaterally.                                      │")
-    # print("  └─────────────────────────────────────────────────────────────────┘")
-    # print()
-    # print("=" * 70)
-
-    # logger.info("=" * 60)
-    # logger.info("Training + Inference complete!")
-    # logger.info("=" * 60)
-
+    
 
 if __name__ == "__main__":
     main()
