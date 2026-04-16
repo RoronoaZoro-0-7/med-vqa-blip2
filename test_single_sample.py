@@ -137,7 +137,7 @@ def main():
     print(f"   {ground_truth}")
     print(f"\n🤖 Prediction:")
     print(f"   {prediction}")
-    print(f"\n📊 Confidence: {confidence_score}")
+    # print(f"\n📊 Confidence: {confidence_score}")
     
     # Check if correct
     pred_clean = prediction.strip().lower()
